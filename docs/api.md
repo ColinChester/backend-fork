@@ -9,7 +9,7 @@
 ### Notes
 - All endpoints return JSON.
 - For easy example enpoint usage, if using VSCode, install the REST Client extension, which will allow you to submit the requests in /backend/src/tools/requests.rest, and view them directly in the IDE.
-- Real DB behavior hasn't been implemented yet, feel free to use these example responses to mock what the backend will look like
+- Real DB behavior hasn't been implemented yet, feel free to use these example responses to mock what the backend will look like.
 - Masked/unmasked gamestates for GET /api/game/:gameId haven't been implemented yet, this doc describes what the behavior will look like.
 
 ___
@@ -59,6 +59,10 @@ The backend persists the texts and returns a guiding prompt for the next player.
 Returns the current state of the game (waiting -> in-progress -> completed), and information on the previous turns.  
 If the state is in-progress, a masked (hidden) version is passed, ensuring the game isn't spoiled by making prompts visible.
 
+### Request Body
+```json
+{}
+```
 
 ### Response (in-progress)
 ```json
