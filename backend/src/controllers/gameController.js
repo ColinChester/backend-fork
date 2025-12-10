@@ -2,7 +2,8 @@ import {
     createGame as createGameService,
     submitTurn as submitTurnService,
     getGameState as getGameStateService,
-    joinGame as joinGameService
+    joinGame as joinGameService,
+    startGame as startGameService,
 } from '../services/gameService.js';
 import {log} from '../tools/logger.js';
 
@@ -50,5 +51,19 @@ export const joinGame = async (req, res) => {
     }
 
     log(`Player ${playerName} joined game ${gameId}`);
+    res.json({game: result.game});
+};
+
+export const startGame = async (req, res) => {
+    const {gameId} = req.params;
+    const {playerId} = req.body || {};
+
+    const result = await startGameService(gameId, {playerId});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Game ${gameId} started by ${playerId || 'unknown'}`);
     res.json({game: result.game});
 };

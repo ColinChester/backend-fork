@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useJoinGame, useGameState } from '../../hooks/useGameAPI'
+import { useCreateGame, useJoinGame, useGameState, useStartGame } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 
@@ -30,9 +30,11 @@ const Lobby = () => {
   
   const createGameMutation = useCreateGame()
   const joinGameMutation = useJoinGame()
+  const startGameMutation = useStartGame()
   const { data: gameData, isLoading: isLoadingGame } = useGameState(gameId, {
     enabled: !!gameId,
     refetchInterval: 2000, // Poll every 2 seconds
+    refetchWhileWaiting: true,
   })
 
   const game = gameData?.game
@@ -40,6 +42,13 @@ const Lobby = () => {
   const players = game?.players || []
   const isFull = gameInfo?.isFull || false
   const canStart = players.length >= 2 && isHost
+
+  // Keep maxPlayers in sync with server once the game loads
+  useEffect(() => {
+    if (game?.maxPlayers) {
+      setMaxPlayers(game.maxPlayers)
+    }
+  }, [game?.maxPlayers])
 
   // Create game on mount if host
   useEffect(() => {
@@ -90,20 +99,46 @@ const Lobby = () => {
 
   const handleStartGame = () => {
     if (game && canStart) {
+      startGameMutation.mutate({
+        gameId: game.id,
+        playerId: user.id,
+      }, {
+        onError: (error) => {
+          console.error('Failed to start game:', error)
+          alert(error.message || 'Failed to start game. Please try again.')
+        },
+      })
+    }
+  }
+
+  // Navigate everyone to the game once the backend flips to active
+  useEffect(() => {
+    if (game?.status === 'active' && game.id) {
+      const timeLimitMinutes = game.turnDurationSeconds ? Math.round(game.turnDurationSeconds / 60) : timeLimit
       startMatch({
         id: game.id,
         mode: 'multiplayer',
-        players,
-        currentPrompt: game.initialPrompt,
+        players: game.players,
+        currentPrompt: game.guidePrompt || game.initialPrompt,
         story: '',
-        timeLimit,
+        timeLimit: timeLimitMinutes,
         status: 'playing',
       })
       navigate(`/multiplayer?gameId=${game.id}`)
     }
-  }
+  }, [
+    game?.status,
+    game?.id,
+    game?.turnDurationSeconds,
+    game?.guidePrompt,
+    game?.initialPrompt,
+    game?.players,
+    navigate,
+    startMatch,
+    timeLimit,
+  ])
 
-  const isLoading = isLoadingGame || createGameMutation.isPending || joinGameMutation.isPending
+  const isLoading = isLoadingGame || createGameMutation.isPending || joinGameMutation.isPending || startGameMutation.isPending
 
   return (
     <div className={`min-h-screen relative transition-colors ${
@@ -367,4 +402,3 @@ const Lobby = () => {
 }
 
 export default Lobby
-

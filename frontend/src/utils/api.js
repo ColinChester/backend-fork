@@ -101,6 +101,19 @@ export const gameAPI = {
       method: 'GET',
     });
   },
+
+  /**
+   * Start a waiting game (host only for multiplayer)
+   * @param {string} gameId - Game ID
+   * @param {Object} data - Additional info (e.g., playerId)
+   * @returns {Promise<Object>} Started game object
+   */
+  startGame: async (gameId, data = {}) => {
+    return apiRequest(`/api/game/${gameId}/start`, {
+      method: 'POST',
+      body: data,
+    });
+  },
 };
 
 /**
@@ -111,4 +124,3 @@ export const healthCheck = async () => {
     method: 'GET',
   });
 };
-

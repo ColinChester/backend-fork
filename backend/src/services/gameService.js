@@ -411,6 +411,49 @@ export const getGameState = async (gameId) => {
   };
 };
 
+export const startGame = async (gameId, { playerId } = {}) => {
+  const gameRef = gamesCollection.doc(gameId);
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status === 'finished') {
+      return { error: 'Game has finished', status: 400 };
+    }
+
+    if (game.status === 'active') {
+      return { game }; // Already started
+    }
+
+    if (game.mode === MODES.MULTI) {
+      if (playerId && playerId !== game.hostId) {
+        return { error: 'Only the host can start the game', status: 403 };
+      }
+
+      if ((game.players || []).length < 2) {
+        return { error: 'At least 2 players are required to start', status: 400 };
+      }
+    }
+
+    const updated = {
+      ...game,
+      status: 'active',
+      updatedAt: nowIso(),
+      turnDeadline: new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
+};
+
 export const resetGames = async () => {
   // Caution: for testing only; deletes all games.
   const snaps = await gamesCollection.listDocuments();

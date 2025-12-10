@@ -58,21 +58,38 @@ export const useSubmitTurn = () => {
 };
 
 /**
+ * Hook to start a waiting game
+ */
+export const useStartGame = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, playerId }) => gameAPI.startGame(gameId, { playerId }),
+    onSuccess: (data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+    },
+  });
+};
+
+/**
  * Hook to fetch game state
  * Automatically polls if game is active
  */
 export const useGameState = (gameId, options = {}) => {
-  const { enabled = true, refetchInterval = null } = options;
+  const { enabled = true, refetchInterval = null, refetchWhileWaiting = false } = options;
 
   return useQuery({
     queryKey: ['game', gameId],
     queryFn: () => gameAPI.getGameState(gameId),
     enabled: enabled && !!gameId,
     refetchInterval: (query) => {
-      // Auto-refetch if game is active
+      // Explicit interval overrides
+      if (refetchInterval) return refetchInterval;
+
+      // Auto-refetch if game is active or if caller wants updates while waiting
       const game = query?.state?.data?.game;
-      if (game && game.status === 'active') {
-        return refetchInterval || 2000; // Poll every 2 seconds for active games
+      if (game && (game.status === 'active' || (refetchWhileWaiting && game.status === 'waiting'))) {
+        return 2000; // Poll every 2 seconds
       }
       return false; // Don't poll for finished/waiting games
     },
@@ -89,4 +106,3 @@ export const usePollGameState = (gameId, interval = 2000) => {
     refetchInterval: interval,
   });
 };
-
