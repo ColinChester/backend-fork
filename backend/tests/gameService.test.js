@@ -50,6 +50,23 @@ describe('gameService', () => {
     expect(game.currentPlayer).toBe(host.name);
   });
 
+  it('exposes the initial prompt as the visible guide before turn 1', async () => {
+    const { createGame, getGameState } = await getServices();
+    const game = await createGame({
+      hostName: host.name,
+      hostId: host.id,
+      initialPrompt: 'Jumpstart',
+      maxTurns: 2,
+      maxPlayers: 2,
+      mode: 'multi',
+    });
+
+    const state = await getGameState(game.id);
+    expect(state.game.initialPrompt).toBe('INIT-Jumpstart');
+    expect(state.game.guidePrompt).toBe('INIT-Jumpstart');
+    expect(state.game.turnsCount).toBe(0);
+  });
+
   it('allows joining a multiplayer game and respects max players', async () => {
     const { createGame, joinGame } = await getServices();
     const game = await createGame({

@@ -11,7 +11,10 @@ import {log} from '../tools/logger.js';
 const scrubGame = (game) => {
     if (!game) return game;
     const {storySoFar, ...rest} = game;
-    return rest;
+    return {
+        ...rest,
+        guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+    };
 };
 
 export const createGame = async (req, res) => {

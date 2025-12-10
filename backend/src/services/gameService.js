@@ -39,7 +39,11 @@ const nowIso = () => new Date().toISOString();
 const scrubGameForPlayer = (game) => {
   if (!game) return game;
   const { storySoFar, ...rest } = game;
-  return rest;
+  return {
+    ...rest,
+    // For display purposes, show the opener as the active prompt until the first guide exists.
+    guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+  };
 };
 
 const advanceTurnState = (game) => {
