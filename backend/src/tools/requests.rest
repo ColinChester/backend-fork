@@ -13,8 +13,11 @@ Content-Type: application/json
   "mode": "multi"
 }
 
-### Join an existing game (1)
-POST http://localhost:3001/api/game/a02c62c8-081a-418e-b2b7-43b83c9183bd/join
+### List open lobbies
+GET http://localhost:3001/api/game/lobbies
+
+### Request to join (needs host approval)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/request-join
 Content-Type: application/json
 
 {
@@ -22,14 +25,37 @@ Content-Type: application/json
   "playerId": "player2-user-1"
 }
 
-### Join an existing game (2)
-POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/join
+### Host approves or denies a join request
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/review-join
 Content-Type: application/json
 
 {
-  "playerName": "Player3",
-  "playerId": "player3-user-1"
+  "hostId": "tester-user-1",
+  "playerId": "player2-user-1",
+  "approve": true
 }
+
+### Host abandons the lobby (closes it)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/abandon
+Content-Type: application/json
+
+{
+  "playerId": "tester-user-1",
+  "reason": "host_left"
+}
+
+### Cleanup all waiting lobbies (admin)
+POST http://localhost:3001/api/game/cleanup-lobbies
+Content-Type: application/json
+
+{}
+
+### List lobbies after cutoff (example minCreatedAt)
+@todayNoon = {{$datetime "YYYY-MM-DD"}}T12:00:00.000Z
+GET http://localhost:3001/api/game/lobbies?minCreatedAt={{todayNoon}}
+
+### List only the most recent lobby (limit parameter)
+GET http://localhost:3001/api/game/lobbies?limit=1
 
 ### Submit a turn (uses ID from createGame)
 POST http://localhost:3001/api/game/d4875d3d-6ccf-4245-ad18-a7a33dc17675/turn

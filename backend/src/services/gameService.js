@@ -43,6 +43,7 @@ const scrubGameForPlayer = (game) => {
     ...rest,
     // For display purposes, show the opener as the active prompt until the first guide exists.
     guidePrompt: rest.guidePrompt ?? (rest.turnsCount ? null : rest.initialPrompt),
+    pendingRequests: rest.pendingRequests || [],
   };
 };
 
@@ -64,6 +65,25 @@ const advanceTurnState = (game) => {
     currentPlayer: nextPlayer.name,
     currentPlayerId: nextPlayer.id,
     turnDeadline: new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+  };
+};
+
+const addPlayerToGame = (game, { playerId, playerName }) => {
+  const players = game.players || [];
+  if (players.find((p) => p.id === playerId || p.name === playerName)) {
+    return { game };
+  }
+
+  if (players.length >= game.maxPlayers) {
+    return { error: 'Game is full', status: 400 };
+  }
+
+  return {
+    game: {
+      ...game,
+      players: [...players, { id: playerId, name: playerName }],
+      updatedAt: nowIso(),
+    },
   };
 };
 
@@ -218,6 +238,8 @@ export const createGame = async ({
     turnDurationSeconds: duration,
     maxTurns: turnsCap,
     maxPlayers: playerCap,
+    requiresApproval: gameMode === MODES.MULTI,
+    pendingRequests: [],
     turnDeadline: initialDeadline,
     currentPlayerIndex: 0,
     currentPlayer: cleanHost,
@@ -254,8 +276,17 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
       return { error: 'Game has finished', status: 400 };
     }
 
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
     if (game.mode !== MODES.MULTI) {
       return { error: 'Cannot join a single-player game', status: 400 };
+    }
+
+    const requiresApproval = game.requiresApproval ?? game.mode === MODES.MULTI;
+    if (requiresApproval && playerId !== game.hostId) {
+      return { error: 'Host approval required', status: 403 };
     }
 
     const already = (game.players || []).find((p) => p.id === playerId || p.name === trimmedName);
@@ -263,18 +294,11 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
       return { game };
     }
 
-    if ((game.players || []).length >= game.maxPlayers) {
-      return { error: 'Game is full', status: 400 };
-    }
+    const addition = addPlayerToGame(game, { playerId, playerName: trimmedName });
+    if (addition.error) return addition;
 
-    const updated = {
-      ...game,
-      players: [...(game.players || []), { id: playerId, name: trimmedName }],
-      updatedAt: nowIso(),
-    };
-
-    tx.set(gameRef, updated);
-    return { game: updated };
+    tx.set(gameRef, addition.game);
+    return addition;
   });
 
   return result;
@@ -543,10 +567,11 @@ export const getGameState = async (gameId) => {
   const timeRemainingSeconds = Number.isFinite(deadlineMs)
     ? Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))
     : null;
+  const playerCount = (game.players || []).length;
   const remainingTurns = game.maxTurns
     ? Math.max(0, game.maxTurns - (game.turnsCount || 0))
     : null;
-  const isFull = game.players.length >= game.maxPlayers;
+  const isFull = playerCount >= game.maxPlayers;
 
   const visibleGame = scrubGameForPlayer(game);
 
@@ -559,7 +584,7 @@ export const getGameState = async (gameId) => {
       timeRemainingSeconds,
       remainingTurns,
       maxTurns: game.maxTurns,
-      playerCount: game.players.length,
+      playerCount,
       maxPlayers: game.maxPlayers,
       isFull,
       scores: game.scores || null,
@@ -609,6 +634,353 @@ export const startGame = async (gameId, { playerId } = {}) => {
   });
 
   return result;
+};
+
+export const abandonGame = async (gameId, { playerId, reason = 'host_left' } = {}) => {
+  const gameRef = gamesCollection.doc(gameId);
+
+  if (!playerId) {
+    return { error: 'playerId is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+    if (game.hostId !== playerId) {
+      return { error: 'Only the host can close the lobby', status: 403 };
+    }
+
+    if (game.status === 'finished') {
+      return { game };
+    }
+
+    const updated = {
+      ...game,
+      status: 'finished',
+      currentPlayer: null,
+      currentPlayerId: null,
+      turnDeadline: null,
+      endedReason: reason,
+      updatedAt: nowIso(),
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
+};
+
+export const cleanupWaitingLobbies = async ({ before = null } = {}) => {
+  const snap = await gamesCollection.where('status', '==', 'waiting').get();
+  const batch = db.batch();
+  const cutoffMs = before ? Date.parse(before) : null;
+  let cleared = 0;
+
+  snap.docs.forEach((doc) => {
+    const data = doc.data();
+    if (cutoffMs) {
+      const createdMs = Date.parse(data.createdAt || '');
+      if (!Number.isFinite(createdMs) || createdMs >= cutoffMs) {
+        return;
+      }
+    }
+    const updated = {
+      ...data,
+      status: 'finished',
+      currentPlayer: null,
+      currentPlayerId: null,
+      turnDeadline: null,
+      endedReason: 'cleanup',
+      updatedAt: nowIso(),
+    };
+    batch.set(doc.ref, updated);
+    cleared += 1;
+  });
+
+  await batch.commit();
+  return { cleared };
+};
+
+export const requestToJoin = async (gameId, { playerName = 'Anonymous', playerId }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  const trimmedName = playerName?.trim();
+
+  if (!trimmedName) {
+    return { error: 'Player name is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'Player id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.status === 'finished') {
+      return { error: 'Game has finished', status: 400 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
+    if (game.mode !== MODES.MULTI) {
+      return { error: 'Cannot join a single-player game', status: 400 };
+    }
+
+    if ((game.players || []).some((p) => p.id === playerId || p.name === trimmedName)) {
+      return { game };
+    }
+
+  if ((game.players || []).length >= game.maxPlayers) {
+    return { error: 'Game is full', status: 400 };
+  }
+
+  const now = nowIso();
+  const pending = game.pendingRequests || [];
+  if (pending.some((req) => req.playerId === playerId)) {
+    return { game: { ...game, pendingRequests: pending, updatedAt: now } };
+  }
+
+  const updated = {
+    ...game,
+    pendingRequests: [
+        ...pending,
+        {
+          playerId,
+          playerName: trimmedName,
+          requestedAt: nowIso(),
+        },
+      ],
+      updatedAt: now,
+    };
+
+    tx.set(gameRef, updated);
+    return { game: updated, requested: true };
+  });
+
+  return result;
+};
+
+export const reviewJoinRequest = async (gameId, { hostId, playerId, approve = false }) => {
+  const gameRef = gamesCollection.doc(gameId);
+
+  if (!hostId) {
+    return { error: 'hostId is required', status: 400 };
+  }
+  if (!playerId) {
+    return { error: 'playerId is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+    if (game.hostId !== hostId) {
+      return { error: 'Only the host can manage join requests', status: 403 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game is not accepting new players', status: 400 };
+    }
+
+    const pending = game.pendingRequests || [];
+    const request = pending.find((req) => req.playerId === playerId);
+    if (!request) {
+      return { error: 'Join request not found', status: 404 };
+    }
+
+    const remainingRequests = pending.filter((req) => req.playerId !== playerId);
+    let updatedGame = {
+      ...game,
+      pendingRequests: remainingRequests,
+      updatedAt: nowIso(),
+    };
+
+    if (approve) {
+      const addition = addPlayerToGame(updatedGame, {
+        playerId: request.playerId,
+        playerName: request.playerName,
+      });
+      if (addition.error) return addition;
+      updatedGame = addition.game;
+    }
+
+    tx.set(gameRef, updatedGame);
+    return { game: updatedGame, approved: approve };
+  });
+
+  return result;
+};
+
+const createdToMs = (value) => {
+  if (!value) return 0;
+  if (typeof value === 'string') {
+    const ms = Date.parse(value);
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  // Firestore Timestamp-like object
+  if (typeof value === 'object' && typeof value.toDate === 'function') {
+    const ms = value.toDate().getTime();
+    return Number.isFinite(ms) ? ms : 0;
+  }
+  if (typeof value === 'object' && typeof value.seconds === 'number') {
+    return value.seconds * 1000 + Math.floor((value.nanoseconds || 0) / 1e6);
+  }
+  return 0;
+};
+
+export const listLobbies = async ({ limit = 25, minCreatedAt = null } = {}) => {
+  const maxLimit = Math.max(1, Math.min(limit, 50));
+  const cutoffMs = minCreatedAt ? Date.parse(minCreatedAt) : null;
+  const staleMs = 5 * 60 * 1000; // 5 minutes
+
+  const toLobby = (game) => ({
+    id: game.id,
+    hostName: game.hostName || 'Host',
+    createdAt: game.createdAt || null,
+    playerCount: (game.players || []).length,
+    maxPlayers: game.maxPlayers || 0,
+    requiresApproval: game.requiresApproval ?? game.mode === MODES.MULTI,
+    pendingRequests: (game.pendingRequests || []).length,
+  });
+
+  try {
+    let query = gamesCollection.where('status', '==', 'waiting');
+    if (minCreatedAt) {
+      query = query.where('createdAt', '>=', minCreatedAt);
+    }
+    query = query.orderBy('createdAt', 'desc').limit(maxLimit);
+
+    const snap = await query.get();
+    const raw = snap.docs.map((doc) => doc.data());
+    const now = Date.now();
+    const staleIds = [];
+    const filtered = raw
+      .filter((g) => (g.mode || MODES.MULTI) === MODES.MULTI)
+      .filter((g) => {
+        const createdMs = createdToMs(g.createdAt);
+        const updatedMs = createdToMs(g.updatedAt) || createdMs;
+        const age = now - (updatedMs || createdMs);
+        const isStale = age > staleMs;
+        if (isStale) {
+          staleIds.push(g.id);
+          return false;
+        }
+        if (cutoffMs && createdMs < cutoffMs) return false;
+        return true;
+      });
+
+    if (staleIds.length) {
+      const batch = db.batch();
+      staleIds.forEach((id) => {
+        const ref = gamesCollection.doc(id);
+        batch.set(ref, {
+          status: 'finished',
+          currentPlayer: null,
+          currentPlayerId: null,
+          turnDeadline: null,
+          endedReason: 'stale_cleanup',
+          updatedAt: nowIso(),
+        }, { merge: true });
+      });
+      batch.commit().catch((err) => console.warn('[listLobbies] stale cleanup failed', err?.message));
+    }
+
+    console.info('[listLobbies]', {
+      path: 'indexed',
+      limit,
+      minCreatedAt,
+      snapCount: snap.size,
+      returned: filtered.length,
+      staleFiltered: staleIds.length,
+      first: filtered.slice(0, 3).map((g) => ({
+        id: g.id,
+        status: g.status,
+        mode: g.mode,
+        createdAt: g.createdAt,
+      })),
+    });
+
+    return filtered.map(toLobby);
+  } catch (error) {
+    // Fallback for index/type issues: scan waiting lobbies in-memory and limit the result
+    console.warn('[listLobbies] indexed query failed, using fallback', {
+      limit,
+      minCreatedAt,
+      error: error?.message,
+    });
+
+    const snap = await gamesCollection.where('status', '==', 'waiting').get();
+    const raw = snap.docs.map((doc) => doc.data());
+    const now = Date.now();
+    const staleIds = [];
+    const filtered = raw
+      .filter((g) => (g.mode || MODES.MULTI) === MODES.MULTI)
+      .filter((g) => {
+        const createdMs = createdToMs(g.createdAt);
+        const updatedMs = createdToMs(g.updatedAt) || createdMs;
+        const age = now - (updatedMs || createdMs);
+        const isStale = age > staleMs;
+        if (isStale) {
+          staleIds.push(g.id);
+          return false;
+        }
+        if (cutoffMs && createdMs < cutoffMs) return false;
+        return true;
+      })
+      .sort((a, b) => {
+        const aTime = createdToMs(a.createdAt);
+        const bTime = createdToMs(b.createdAt);
+        return bTime - aTime;
+      })
+      .slice(0, maxLimit);
+
+    if (staleIds.length) {
+      const batch = db.batch();
+      staleIds.forEach((id) => {
+        const ref = gamesCollection.doc(id);
+        batch.set(ref, {
+          status: 'finished',
+          currentPlayer: null,
+          currentPlayerId: null,
+          turnDeadline: null,
+          endedReason: 'stale_cleanup',
+          updatedAt: nowIso(),
+        }, { merge: true });
+      });
+      batch.commit().catch((err) => console.warn('[listLobbies] stale cleanup failed (fallback)', err?.message));
+    }
+
+    console.info('[listLobbies]', {
+      path: 'fallback',
+      limit,
+      minCreatedAt,
+      snapCount: snap.size,
+      returned: filtered.length,
+      staleFiltered: staleIds.length,
+      first: filtered.slice(0, 3).map((g) => ({
+        id: g.id,
+        status: g.status,
+        mode: g.mode,
+        createdAt: g.createdAt,
+      })),
+    });
+
+    return filtered.map(toLobby);
+  }
 };
 
 export const resetGames = async () => {

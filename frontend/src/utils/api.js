@@ -127,6 +127,63 @@ export const gameAPI = {
       body: data,
     });
   },
+
+  /**
+   * Host abandons/finishes a lobby
+   */
+  abandonGame: async (gameId, data = {}) => {
+    return apiRequest(`/api/game/${gameId}/abandon`, {
+      method: 'POST',
+      body: data,
+    });
+  },
+
+  /**
+   * Cleanup all waiting lobbies (admin)
+   */
+  cleanupLobbies: async () => {
+    return apiRequest('/api/game/cleanup-lobbies', {
+      method: 'POST',
+    });
+  },
+
+  /**
+   * List available multiplayer lobbies waiting for players
+   * @param {number} limit - Maximum number of lobbies to return
+   */
+  listLobbies: async (limit = 25, opts = {}) => {
+    const searchParams = new URLSearchParams({ limit: String(limit) });
+    if (opts.minCreatedAt) {
+      searchParams.set('minCreatedAt', opts.minCreatedAt);
+    }
+    return apiRequest(`/api/game/lobbies?${searchParams.toString()}`, {
+      method: 'GET',
+    });
+  },
+
+  /**
+   * Request to join a multiplayer lobby (host approval required)
+   * @param {string} gameId - Lobby/game ID
+   * @param {Object} playerData - Player info
+   */
+  requestToJoin: async (gameId, playerData) => {
+    return apiRequest(`/api/game/${gameId}/request-join`, {
+      method: 'POST',
+      body: playerData,
+    });
+  },
+
+  /**
+   * Host reviews a join request
+   * @param {string} gameId - Lobby/game ID
+   * @param {Object} decision - Review payload containing hostId, playerId, approve
+   */
+  reviewJoinRequest: async (gameId, decision) => {
+    return apiRequest(`/api/game/${gameId}/review-join`, {
+      method: 'POST',
+      body: decision,
+    });
+  },
 };
 
 /**

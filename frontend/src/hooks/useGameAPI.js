@@ -81,6 +81,35 @@ export const useStartGame = () => {
 };
 
 /**
+ * Hook to request to join a lobby (host approval)
+ */
+export const useRequestJoin = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, playerData }) => gameAPI.requestToJoin(gameId, playerData),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
+  });
+};
+
+/**
+ * Hook for hosts to review join requests
+ */
+export const useReviewJoinRequest = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, decision }) => gameAPI.reviewJoinRequest(gameId, decision),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+    },
+  });
+};
+
+/**
  * Hook to fetch game state
  * Automatically polls if game is active
  */
@@ -113,5 +142,35 @@ export const useGameState = (gameId, options = {}) => {
 export const usePollGameState = (gameId, interval = 2000) => {
   return useGameState(gameId, {
     refetchInterval: interval,
+  });
+};
+
+/**
+ * Hook to fetch open multiplayer lobbies
+ */
+export const useAvailableLobbies = (options = {}) => {
+  const { enabled = true, refetchInterval = 5000, minCreatedAt = null } = options;
+
+  return useQuery({
+    queryKey: ['lobbies', minCreatedAt],
+    queryFn: () => gameAPI.listLobbies(undefined, { minCreatedAt }),
+    enabled,
+    refetchInterval,
+    refetchIntervalInBackground: true,
+  });
+};
+
+/**
+ * Host abandons/finishes a lobby
+ */
+export const useAbandonGame = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, playerId, reason }) => gameAPI.abandonGame(gameId, { playerId, reason }),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
   });
 };

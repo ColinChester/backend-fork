@@ -5,6 +5,11 @@ import {
     joinGame as joinGameService,
     startGame as startGameService,
     previewTurn as previewTurnService,
+    requestToJoin as requestToJoinService,
+    reviewJoinRequest as reviewJoinRequestService,
+    listLobbies as listLobbiesService,
+    abandonGame as abandonGameService,
+    cleanupWaitingLobbies as cleanupWaitingLobbiesService,
 } from '../services/gameService.js';
 import {log} from '../tools/logger.js';
 
@@ -90,4 +95,61 @@ export const startGame = async (req, res) => {
 
     log(`Game ${gameId} started by ${playerId || 'unknown'}`);
     res.json({game: scrubGame(result.game)});
+};
+
+export const requestToJoin = async (req, res) => {
+    const {gameId} = req.params;
+    const {playerName, playerId} = req.body || {};
+
+    const result = await requestToJoinService(gameId, {playerName, playerId});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Player ${playerName} requested to join game ${gameId}`);
+    res.status(202).json({game: scrubGame(result.game), requested: true});
+};
+
+export const reviewJoinRequest = async (req, res) => {
+    const {gameId} = req.params;
+    const {hostId, playerId, approve} = req.body || {};
+
+    const result = await reviewJoinRequestService(gameId, {hostId, playerId, approve});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Host ${hostId} ${approve ? 'approved' : 'denied'} player ${playerId} for game ${gameId}`);
+    res.json({game: scrubGame(result.game), approved: approve});
+};
+
+export const listLobbies = async (req, res) => {
+    const limit = Number(req.query.limit) || 25;
+    const minCreatedAt = req.query.minCreatedAt || null;
+    const lobbies = await listLobbiesService({limit, minCreatedAt});
+
+    res.json({lobbies});
+};
+
+export const abandonGame = async (req, res) => {
+    const {gameId} = req.params;
+    const {playerId, reason} = req.body || {};
+
+    const result = await abandonGameService(gameId, {playerId, reason});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    log(`Game ${gameId} closed by host ${playerId}`);
+    res.json({game: scrubGame(result.game)});
+};
+
+export const cleanupWaitingLobbies = async (req, res) => {
+    const {before} = req.body || {};
+    const result = await cleanupWaitingLobbiesService({before});
+    log(`Cleaned up ${result.cleared} waiting lobbies${before ? ` before ${before}` : ''}`);
+    res.json(result);
 };
