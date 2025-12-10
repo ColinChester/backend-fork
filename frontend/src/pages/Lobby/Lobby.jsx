@@ -9,7 +9,7 @@ import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useTheme } from '../../context/ThemeContext'
 import { useUser } from '../../context/UserContext'
-import { useCreateGame, useGameState, useStartGame, useRequestJoin, useReviewJoinRequest, useAvailableLobbies, useAbandonGame } from '../../hooks/useGameAPI'
+import { useCreateGame, useGameState, useStartGame, useRequestJoin, useReviewJoinRequest, useAvailableLobbies, useAbandonGame, useUpdateGameSettings } from '../../hooks/useGameAPI'
 import { useMatch } from '../../context/MatchContext'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
 
@@ -29,6 +29,7 @@ const Lobby = () => {
   
   const createGameMutation = useCreateGame()
   const startGameMutation = useStartGame()
+  const updateGameSettingsMutation = useUpdateGameSettings()
   const requestJoinMutation = useRequestJoin()
   const reviewJoinMutation = useReviewJoinRequest()
   const abandonGameMutation = useAbandonGame()
@@ -53,7 +54,8 @@ const Lobby = () => {
   const isFull = gameInfo?.isFull || false
   const canStart = players.length >= 2 && isHost && game?.status === 'waiting'
   const myPendingRequest = pendingRequests.find(req => req.playerId === user.id)
-  const displayMaxPlayers = game?.maxPlayers || maxPlayers
+  const canEditLobbySettings = isHost && game?.status === 'waiting'
+  const displayMaxPlayers = canEditLobbySettings ? maxPlayers : game?.maxPlayers || maxPlayers
   const waitingForApproval = !isHost && !isPlayer && !!myPendingRequest
   const apiBaseUrl = import.meta.env.VITE_API_URL || 'http://localhost:3001'
 
@@ -63,6 +65,12 @@ const Lobby = () => {
       setMaxPlayers(game.maxPlayers)
     }
   }, [game?.maxPlayers])
+
+  useEffect(() => {
+    if (game?.turnDurationSeconds) {
+      setTimeLimit(Math.round(game.turnDurationSeconds / 60))
+    }
+  }, [game?.turnDurationSeconds])
 
   const handleCreateLobby = () => {
     if (createGameMutation.isPending || !user.id) return
@@ -86,6 +94,34 @@ const Lobby = () => {
         alert('Failed to create game. Please try again.')
       },
     })
+  }
+
+  const handleMaxPlayersChange = (count) => {
+    setMaxPlayers(count)
+
+    if (game && canEditLobbySettings) {
+      updateGameSettingsMutation.mutate({
+        gameId: game.id,
+        settings: {
+          hostId: user.id,
+          maxPlayers: count,
+        },
+      })
+    }
+  }
+
+  const handleTimeLimitChange = (minutes) => {
+    setTimeLimit(minutes)
+
+    if (game && canEditLobbySettings) {
+      updateGameSettingsMutation.mutate({
+        gameId: game.id,
+        settings: {
+          hostId: user.id,
+          turnDurationSeconds: minutes * 60,
+        },
+      })
+    }
   }
 
   const handleRequestJoin = () => {
@@ -207,7 +243,7 @@ const Lobby = () => {
     timeLimit,
   ])
 
-  const isLoading = isLoadingGame || createGameMutation.isPending || startGameMutation.isPending || requestJoinMutation.isPending || reviewJoinMutation.isPending || abandonGameMutation.isPending
+  const isLoading = isLoadingGame || createGameMutation.isPending || startGameMutation.isPending || requestJoinMutation.isPending || reviewJoinMutation.isPending || abandonGameMutation.isPending || updateGameSettingsMutation.isPending
   const startButtonLabel = !gameId
     ? 'Select a lobby to begin'
     : isLoading
@@ -483,8 +519,8 @@ const Lobby = () => {
                       key={time}
                       variant={timeLimit === time ? 'primary' : 'ghost'}
                       size="sm"
-                      onClick={() => setTimeLimit(time)}
-                      disabled={!!game}
+                      onClick={() => handleTimeLimitChange(time)}
+                      disabled={game ? (!canEditLobbySettings || updateGameSettingsMutation.isPending) : false}
                       className="flex-1"
                     >
                       {time}m
@@ -589,8 +625,8 @@ const Lobby = () => {
                         key={count}
                         variant={maxPlayers === count ? 'primary' : 'ghost'}
                         size="sm"
-                        onClick={() => setMaxPlayers(count)}
-                        disabled={!!game}
+                        onClick={() => handleMaxPlayersChange(count)}
+                        disabled={game ? (!canEditLobbySettings || updateGameSettingsMutation.isPending) : false}
                         className="flex-1"
                       >
                         {count}

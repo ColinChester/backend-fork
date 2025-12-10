@@ -100,6 +100,26 @@ const saveFinishedGameForUser = async (userId, summary) => {
   await savedGamesRef.doc(summary.gameId).set(summary);
 };
 
+export const getUserHistory = async (userId, limit = 5) => {
+  if (!userId) {
+    return { error: 'userId is required', status: 400 };
+  }
+
+  const savedGamesRef = usersCollection
+    .doc(userId)
+    .collection('savedGames')
+    .orderBy('createdAt', 'desc')
+    .limit(Math.max(1, Math.min(limit, 10)));
+
+  const snap = await savedGamesRef.get();
+  const games = snap.docs.map((doc) => ({
+    id: doc.id,
+    ...doc.data(),
+  }));
+
+  return { games };
+};
+
 const updateLeaderboard = async (playerScores, players, summary) => {
   if (!playerScores?.players) return;
   const nameToId = new Map(players.map((p) => [p.name, p.id]));
@@ -251,6 +271,71 @@ export const createGame = async ({
 
   await gamesCollection.doc(gameId).set(game);
   return game;
+};
+
+export const updateGameSettings = async (gameId, { hostId, maxPlayers, turnDurationSeconds }) => {
+  const gameRef = gamesCollection.doc(gameId);
+  if (!hostId) {
+    return { error: 'Host id is required', status: 400 };
+  }
+
+  const result = await db.runTransaction(async (tx) => {
+    const snap = await tx.get(gameRef);
+    if (!snap.exists) {
+      return { error: 'Game not found', status: 404 };
+    }
+
+    const game = snap.data();
+
+    if (game.hostId !== hostId) {
+      return { error: 'Only the host can update lobby settings', status: 403 };
+    }
+
+    if (game.status !== 'waiting') {
+      return { error: 'Game has already started', status: 400 };
+    }
+
+    const updates = {};
+
+    if (typeof maxPlayers !== 'undefined') {
+      const currentPlayers = (game.players || []).length;
+      const minPlayers = game.mode === MODES.SINGLE ? 1 : 2;
+      const minCap = Math.max(currentPlayers, minPlayers);
+      const requestedCap = clamp(maxPlayers, minCap, 7, game.maxPlayers || minCap);
+
+      if (!Number.isFinite(requestedCap)) {
+        return { error: 'Invalid maxPlayers value', status: 400 };
+      }
+
+      if (requestedCap !== game.maxPlayers) {
+        updates.maxPlayers = requestedCap;
+      }
+    }
+
+    if (typeof turnDurationSeconds !== 'undefined') {
+      const requestedDuration = clamp(turnDurationSeconds, 30, 600, game.turnDurationSeconds || 60);
+      if (!Number.isFinite(requestedDuration)) {
+        return { error: 'Invalid turnDurationSeconds value', status: 400 };
+      }
+      if (requestedDuration !== game.turnDurationSeconds) {
+        updates.turnDurationSeconds = requestedDuration;
+      }
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return { game };
+    }
+
+    const updated = {
+      ...game,
+      ...updates,
+      updatedAt: nowIso(),
+    };
+    tx.set(gameRef, updated);
+    return { game: updated };
+  });
+
+  return result;
 };
 
 export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) => {
@@ -519,8 +604,15 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       const summary = {
         gameId,
         createdAt: nowIso(),
+        finishedAt: nowIso(),
         summary: scores?.summary || 'Game finished',
         maxTurns: result.game.maxTurns,
+        maxPlayers: result.game.maxPlayers,
+        mode: result.game.mode,
+        hostId: result.game.hostId,
+        hostName: result.game.hostName,
+        playerCount: (result.game.players || []).length,
+        turnDurationSeconds: result.game.turnDurationSeconds,
         turns: turnSummaries,
         scores: scores?.players || null,
       };

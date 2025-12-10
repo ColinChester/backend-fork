@@ -13,8 +13,20 @@ Content-Type: application/json
   "mode": "multi"
 }
 
+### Update lobby settings (host-only, while waiting)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/settings
+Content-Type: application/json
+
+{
+  "hostId": "tester-user-1",
+  "maxPlayers": 5
+}
+
 ### List open lobbies
 GET http://localhost:3001/api/game/lobbies
+
+### Fetch recent games for a user (history)
+GET http://localhost:3001/api/game/user/tester-user-1/history?limit=5
 
 ### Request to join (needs host approval)
 POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/request-join

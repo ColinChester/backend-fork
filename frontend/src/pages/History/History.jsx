@@ -6,52 +6,21 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useUser } from '../../context/UserContext'
+import { useUserHistory } from '../../hooks/useGameAPI'
 
 const History = () => {
   const navigate = useNavigate()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
+  const { data, isLoading, isError } = useUserHistory(user?.id, 5)
 
-  const historyItems = [
-    {
-      id: '1',
-      mode: 'Multiplayer',
-      title: 'The Enchanted Forest',
-      players: 4,
-      date: '2024-01-15',
-      score: 850,
-      result: 'win',
-      preview: 'Once upon a time, in a forest where the trees whispered secrets...',
-    },
-    {
-      id: '2',
-      mode: 'RapidFire',
-      title: 'Space Adventure',
-      players: 1,
-      date: '2024-01-14',
-      score: 1200,
-      result: 'win',
-      preview: 'The spaceship hurtled through the asteroid field...',
-    },
-    {
-      id: '3',
-      mode: 'Single Player',
-      title: 'Mystery Mansion',
-      players: 1,
-      date: '2024-01-13',
-      score: 650,
-      result: 'loss',
-      preview: 'The old mansion creaked in the wind...',
-    },
-  ]
+  const historyItems = data?.games || []
 
   const getModeIcon = (mode) => {
-    if (mode === 'Multiplayer') return '👥'
-    if (mode === 'RapidFire') return '⚡'
+    if (mode === 'multi' || mode === 'Multiplayer') return '👥'
+    if (mode === 'rapid' || mode === 'RapidFire') return '⚡'
     return '⚔️'
-  }
-
-  const getResultIcon = (result) => {
-    return result === 'win' ? '✅' : '❌'
   }
 
   return (
@@ -103,53 +72,89 @@ const History = () => {
             <div className="w-24" />
           </div>
 
-          <div className="space-y-4">
-            {historyItems.map((item, index) => (
-              <motion.div
-                key={item.id}
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: index * 0.1 }}
-              >
-                <Card className="p-6 hover:scale-[1.02] transition-transform">
-                  <div className="flex items-start gap-6">
-                    <div className="text-4xl">
-                      {getModeIcon(item.mode)}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-4 mb-2">
-                        <h3 className="text-2xl font-header font-bold">
-                          {item.title}
-                        </h3>
-                        <span className="text-sm text-cloud-gray">
-                          {getResultIcon(item.result)}
-                        </span>
-                        <span className="text-sm bg-soft-charcoal px-3 py-1 rounded-full">
-                          {item.mode}
-                        </span>
-                      </div>
-                      <p className={`mb-4 line-clamp-2 ${themeClasses.textSecondary}`}>
-                        {item.preview}
-                      </p>
-                      <div className={`flex items-center gap-6 text-sm ${themeClasses.textSecondary}`}>
-                        <span>📅 {item.date}</span>
-                        <span>👥 {item.players} players</span>
-                        <span className="text-sunbeam-yellow font-bold">
-                          ⭐ {item.score} points
-                        </span>
-                      </div>
-                    </div>
-                    <Button
-                      variant="secondary"
-                      onClick={() => navigate(`/story/${item.id}`)}
-                    >
-                      View Story
-                    </Button>
-                  </div>
+          {!user?.id && (
+            <Card className="p-6">
+              <div className="text-center">
+                <div className="text-lg font-semibold">Sign in to view your recent games</div>
+                <p className={themeClasses.textSecondary}>We show the last 5 games linked to your Google account.</p>
+              </div>
+            </Card>
+          )}
+
+          {user?.id && (
+            <div className="space-y-4">
+              {isLoading && (
+                <Card className="p-6 text-center">Loading your history...</Card>
+              )}
+              {isError && (
+                <Card className="p-6 text-center text-red-400">Could not load history. Please try again.</Card>
+              )}
+              {!isLoading && !isError && historyItems.length === 0 && (
+                <Card className="p-6 text-center">
+                  <div className="text-lg font-semibold">No games yet</div>
+                  <p className={themeClasses.textSecondary}>Finish a game to see it here.</p>
                 </Card>
-              </motion.div>
-            ))}
-          </div>
+              )}
+              {historyItems.map((item, index) => {
+                const modeLabel = item.mode === 'multi' ? 'Multiplayer' : item.mode === 'rapid' ? 'RapidFire' : 'Single Player'
+                const created = item.finishedAt || item.createdAt
+                const preview = item.turns?.[0]?.text || item.summary || 'Story preview unavailable.'
+                const players = item.playerCount || Object.keys(item.scores || {}).length || '—'
+                const scoreDisplay = item.scores ? Math.round(Object.values(item.scores).reduce((a, b) => a + (b?.total || 0), 0)) : null
+                const durationMinutes = item.turnDurationSeconds ? Math.round(item.turnDurationSeconds / 60) : null
+
+                return (
+                  <motion.div
+                    key={item.id}
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ delay: index * 0.05 }}
+                  >
+                    <Card className="p-6 hover:scale-[1.02] transition-transform">
+                      <div className="flex items-start gap-6">
+                        <div className="text-4xl">
+                          {getModeIcon(modeLabel)}
+                        </div>
+                        <div className="flex-1">
+                          <div className="flex items-center gap-3 mb-2 flex-wrap">
+                            <h3 className="text-2xl font-header font-bold">
+                              {item.hostName ? `${item.hostName}'s game` : 'Finished game'}
+                            </h3>
+                            <span className="text-sm bg-soft-charcoal px-3 py-1 rounded-full">
+                              {modeLabel}
+                            </span>
+                            {durationMinutes ? (
+                              <span className="text-xs bg-electric-purple/20 text-electric-purple px-2 py-1 rounded-full">
+                                {durationMinutes}m turns
+                              </span>
+                            ) : null}
+                          </div>
+                          <p className={`mb-4 line-clamp-2 ${themeClasses.textSecondary}`}>
+                            {preview}
+                          </p>
+                          <div className={`flex items-center gap-4 text-sm ${themeClasses.textSecondary} flex-wrap`}>
+                            <span>📅 {created ? new Date(created).toLocaleDateString() : 'Unknown date'}</span>
+                            <span>👥 {players} players</span>
+                            {scoreDisplay ? (
+                              <span className="text-sunbeam-yellow font-bold">
+                                ⭐ {scoreDisplay} total pts
+                              </span>
+                            ) : null}
+                          </div>
+                        </div>
+                        <Button
+                          variant="secondary"
+                          onClick={() => navigate(`/story/${item.gameId || item.id}`)}
+                        >
+                          View Story
+                        </Button>
+                      </div>
+                    </Card>
+                  </motion.div>
+                )
+              })}
+            </div>
+          )}
         </div>
       </Container>
     </div>
@@ -157,4 +162,3 @@ const History = () => {
 }
 
 export default History
-

@@ -1,5 +1,6 @@
 import {
     createGame as createGameService,
+    updateGameSettings as updateGameSettingsService,
     submitTurn as submitTurnService,
     getGameState as getGameStateService,
     joinGame as joinGameService,
@@ -10,6 +11,7 @@ import {
     listLobbies as listLobbiesService,
     abandonGame as abandonGameService,
     cleanupWaitingLobbies as cleanupWaitingLobbiesService,
+    getUserHistory as getUserHistoryService,
 } from '../services/gameService.js';
 import {log} from '../tools/logger.js';
 
@@ -28,6 +30,18 @@ export const createGame = async (req, res) => {
 
     log('Created game', game.id);
     res.status(201).json({game: scrubGame(game)});
+};
+
+export const updateGameSettings = async (req, res) => {
+    const {gameId} = req.params;
+    const {hostId, maxPlayers} = req.body || {};
+    const result = await updateGameSettingsService(gameId, {hostId, maxPlayers});
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    res.json({game: scrubGame(result.game)});
 };
 
 export const submitTurn = async (req, res) => {
@@ -152,4 +166,16 @@ export const cleanupWaitingLobbies = async (req, res) => {
     const result = await cleanupWaitingLobbiesService({before});
     log(`Cleaned up ${result.cleared} waiting lobbies${before ? ` before ${before}` : ''}`);
     res.json(result);
+};
+
+export const getUserHistory = async (req, res) => {
+    const {userId} = req.params;
+    const limit = Number(req.query.limit) || 5;
+    const result = await getUserHistoryService(userId, limit);
+
+    if (result.error) {
+        return res.status(result.status || 400).json({error: result.error});
+    }
+
+    res.json({games: result.games});
 };

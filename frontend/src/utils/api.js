@@ -129,6 +129,16 @@ export const gameAPI = {
   },
 
   /**
+   * Update lobby settings (host only)
+   */
+  updateGameSettings: async (gameId, settings) => {
+    return apiRequest(`/api/game/${gameId}/settings`, {
+      method: 'POST',
+      body: settings,
+    });
+  },
+
+  /**
    * Host abandons/finishes a lobby
    */
   abandonGame: async (gameId, data = {}) => {
@@ -182,6 +192,15 @@ export const gameAPI = {
     return apiRequest(`/api/game/${gameId}/review-join`, {
       method: 'POST',
       body: decision,
+    });
+  },
+
+  /**
+   * Get latest finished games for a user
+   */
+  getUserHistory: async (userId, limit = 5) => {
+    return apiRequest(`/api/game/user/${userId}/history?limit=${limit}`, {
+      method: 'GET',
     });
   },
 };

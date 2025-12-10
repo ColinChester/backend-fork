@@ -81,6 +81,21 @@ export const useStartGame = () => {
 };
 
 /**
+ * Hook to update lobby settings (e.g., max players)
+ */
+export const useUpdateGameSettings = () => {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: ({ gameId, settings }) => gameAPI.updateGameSettings(gameId, settings),
+    onSuccess: (_data, variables) => {
+      queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
+      queryClient.invalidateQueries({ queryKey: ['lobbies'] });
+    },
+  });
+};
+
+/**
  * Hook to request to join a lobby (host approval)
  */
 export const useRequestJoin = () => {
@@ -172,5 +187,17 @@ export const useAbandonGame = () => {
       queryClient.invalidateQueries({ queryKey: ['game', variables.gameId] });
       queryClient.invalidateQueries({ queryKey: ['lobbies'] });
     },
+  });
+};
+
+/**
+ * Hook to fetch recent games for a user
+ */
+export const useUserHistory = (userId, limit = 5) => {
+  return useQuery({
+    queryKey: ['user-history', userId, limit],
+    queryFn: () => gameAPI.getUserHistory(userId, limit),
+    enabled: !!userId,
+    staleTime: 60_000,
   });
 };
