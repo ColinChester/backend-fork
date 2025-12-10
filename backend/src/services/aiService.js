@@ -21,8 +21,10 @@ const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, i
       role: 'system',
       content: [
         'You create challenging constraints for a collaborative storytelling game.',
-        'Read the story context and craft ONE concise instruction that makes the next continuation trickier while staying coherent.',
-        'The instruction should start with "Continue the story, but..." and must reference concrete details from the provided context.',
+        'Read the story context and craft ONE concise, surprising instruction that makes the next continuation harder while staying coherent.',
+        'Force in a bizarre or random element (word/phrase/object/character/condition) that does NOT naturally follow from the story, but can be justified.',
+        'The instruction must start with "Continue the story, but..." and reference concrete details from the context.',
+        'Examples of surprise elements: a specific pun, an odd material, an unexpected refusal, a strange rule, a pop-culture reference, or an impossible environment.',
         'Keep it under 28 words. Do not write story text, only the instruction.',
       ].join(' '),
     },
@@ -41,7 +43,7 @@ const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, i
 
 const fallbackPrompt = ({ storySoFar, lastTurnText }) => {
   const base = truncate(lastTurnText || storySoFar || 'the current scene', 160);
-  return `Continue the story, but add a twist that complicates ${base}.`;
+  return `Continue the story, but weave in a bizarre obstacle about ${base} using an odd item or phrase (e.g., rubber ducks or "quantum spaghetti").`;
 };
 
 const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } = {}) => {
