@@ -185,9 +185,10 @@ export const createGame = async ({
   const prompt = await generateInitialPrompt(seedPrompt);
 
   const isRapid = mode === MODES.RAPID;
+  const isSingle = mode === MODES.SINGLE;
   const duration = isRapid
     ? RAPID_CONFIG.initialDurationSeconds
-    : clamp(turnDurationSeconds, 30, 120, 60);
+    : clamp(turnDurationSeconds, 30, 600, 60);
   const turnsCap = clamp(maxTurns, 1, 50, isRapid ? 50 : 5);
   const minPlayers = mode === MODES.SINGLE || isRapid ? 1 : 2;
   const defaultCap = isRapid ? 2 : mode === MODES.SINGLE ? 1 : 3;
@@ -198,13 +199,18 @@ export const createGame = async ({
 
   const players = [{ id: hostId, name: cleanHost }];
 
-  const gameMode = isRapid ? MODES.RAPID : mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI;
+  const gameMode = isRapid ? MODES.RAPID : isSingle ? MODES.SINGLE : MODES.MULTI;
+  const initialStatus = isRapid || isSingle ? 'active' : 'waiting';
+  const initialDeadline =
+    initialStatus === 'active'
+      ? new Date(Date.now() + duration * 1000).toISOString()
+      : null;
 
   const game = {
     id: gameId,
     hostId,
     hostName: cleanHost,
-    status: isRapid ? 'active' : 'waiting',
+    status: initialStatus,
     initialPrompt: prompt,
     guidePrompt: null,
     storySoFar: prompt,
@@ -214,9 +220,7 @@ export const createGame = async ({
     turnDurationSeconds: duration,
     maxTurns: turnsCap,
     maxPlayers: playerCap,
-    turnDeadline: isRapid
-      ? new Date(Date.now() + duration * 1000).toISOString()
-      : null,
+    turnDeadline: initialDeadline,
     currentPlayerIndex: 0,
     currentPlayer: cleanHost,
     currentPlayerId: hostId,

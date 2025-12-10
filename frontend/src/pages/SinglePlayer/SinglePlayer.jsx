@@ -22,6 +22,8 @@ const SinglePlayer = () => {
   const { startMatch, updateMatch } = useMatch()
   const [story, setStory] = useState('')
   const [preview, setPreview] = useState('')
+  const [turnDurationSeconds, setTurnDurationSeconds] = useState(180) // default 3 minutes
+  const [hasStarted, setHasStarted] = useState(!!searchParams.get('gameId'))
   
   const gameId = searchParams.get('gameId')
   const createGameMutation = useCreateGame()
@@ -44,39 +46,44 @@ const SinglePlayer = () => {
   const previousTurn = game?.lastTurn || gameInfo?.lastTurn
   const showPreviousTurn = isMyTurn && previousTurn?.text
 
-  // Create game on mount if no gameId
   useEffect(() => {
-    if (!gameId && user.id && !createGameMutation.isPending) {
-      createGameMutation.mutate({
-        hostName: user.username || 'Player',
-        hostId: user.id,
-        initialPrompt: 'You wake up in a world where gravity works sideways.',
-        turnDurationSeconds: 300, // 5 minutes
-        maxTurns: 5,
-        maxPlayers: 2,
-        mode: 'single',
-      }, {
-        onSuccess: (data) => {
-          if (data?.game?.id) {
-            navigate(`/singleplayer?gameId=${data.game.id}`, { replace: true })
-            startMatch({
-              id: data.game.id,
-              mode: 'singleplayer',
-              players: data.game.players,
-              currentPrompt: data.game.initialPrompt,
-              story: '',
-              timeLimit: 5,
-              status: 'playing',
-            })
-          }
-        },
-        onError: (error) => {
-          console.error('Failed to create game:', error)
-          alert('Failed to create game. Please try again.')
-        },
-      })
+    if (game?.turnDurationSeconds) {
+      setTurnDurationSeconds(game.turnDurationSeconds)
     }
-  }, [gameId, user.id])
+  }, [game?.turnDurationSeconds])
+
+  const beginGame = () => {
+    if (!user.id || createGameMutation.isPending) return
+    setHasStarted(true)
+    createGameMutation.mutate({
+      hostName: user.username || 'Player',
+      hostId: user.id,
+      initialPrompt: 'You wake up in a world where gravity works sideways.',
+      turnDurationSeconds,
+      maxTurns: 5,
+      maxPlayers: 2,
+      mode: 'single',
+    }, {
+      onSuccess: (data) => {
+        if (data?.game?.id) {
+          navigate(`/singleplayer?gameId=${data.game.id}`, { replace: true })
+          startMatch({
+            id: data.game.id,
+            mode: 'singleplayer',
+            players: data.game.players,
+            currentPrompt: data.game.initialPrompt,
+            story: '',
+            timeLimit: Math.round(turnDurationSeconds / 60),
+            status: 'playing',
+          })
+        }
+      },
+      onError: (error) => {
+        console.error('Failed to create game:', error)
+        alert('Failed to create game. Please try again.')
+      },
+    })
+  }
 
   // Update match context when game state changes
   useEffect(() => {
@@ -144,6 +151,50 @@ const SinglePlayer = () => {
         alert(error.message || 'Failed to submit turn. Please try again.')
       },
     })
+  }
+
+  if (!gameId) {
+    return (
+      <div className={`min-h-screen relative transition-colors ${themeClasses.bg}`}>
+        <div className="absolute top-4 right-4 z-20">
+          <ThemeToggle />
+        </div>
+        <AnimatedBackground variant="game" />
+        <Container className="relative z-10">
+          <div className="py-12 max-w-3xl mx-auto">
+            <Card className="p-8">
+              <div className="flex items-center justify-between mb-6">
+                <div>
+                  <h2 className={`text-2xl font-header font-bold ${themeClasses.text}`}>1v1 vs AI</h2>
+                  <p className={`${themeClasses.textSecondary} text-sm`}>Choose your turn timer, then start the duel.</p>
+                </div>
+                <div className="text-3xl">⚔️</div>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                {[60, 120, 180, 300].map((sec) => (
+                  <Button
+                    key={sec}
+                    variant={turnDurationSeconds === sec ? 'primary' : 'secondary'}
+                    onClick={() => setTurnDurationSeconds(sec)}
+                    className="w-full"
+                  >
+                    {Math.round(sec / 60)} minute{sec === 60 ? '' : 's'}
+                  </Button>
+                ))}
+              </div>
+              <Button
+                variant="primary"
+                className="mt-6 w-full"
+                disabled={createGameMutation.isPending || !user.id}
+                onClick={beginGame}
+              >
+                {createGameMutation.isPending ? 'Starting...' : 'Start Match'}
+              </Button>
+            </Card>
+          </div>
+        </Container>
+      </div>
+    )
   }
 
   return (
@@ -223,7 +274,7 @@ const SinglePlayer = () => {
                   </h3>
                   {timeRemaining > 0 && (
                     <Timer
-                      initialTime={300}
+                      initialTime={game?.turnDurationSeconds || turnDurationSeconds || 300}
                       timeRemaining={timeRemaining}
                       size={80}
                     />
