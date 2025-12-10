@@ -4,36 +4,45 @@ const GROQ_TIMEOUT_MS = Number(process.env.GROQ_TIMEOUT_MS || 10000);
 const GROQ_BASE_URL = process.env.GROQ_BASE_URL || 'https://api.groq.com/openai/v1';
 
 const truncate = (text, limit) => {
+  if (!text) return '';
   if (text.length <= limit) {
     return text;
   }
   return `${text.slice(0, limit - 3)}...`;
 };
 
-const buildMessages = (safeLine, turnNumber) => [
-  {
-    role: 'system',
-    content: [
-      'Story mentor: respond with exactly 2-3 sentences.',
-      'Advance the plot a little, keep tension, avoid closing threads.',
-      'Never spoil hidden outcomes or future reveals.',
-      'Do not introduce new characters or events unless the prompt clearly implies them.',
-    ].join(' '),
-  },
-  {
-    role: 'user',
-    content: `Turn ${turnNumber}. Continue from: "${safeLine}".`,
-  },
-];
+const buildMessages = ({ storySoFar, lastTurnText, previousPrompt, turnNumber, initialPrompt }) => {
+  const safeStory = truncate(storySoFar || initialPrompt || 'The story begins...', 1200);
+  const safeLastTurn = truncate(lastTurnText || safeStory || 'the latest beat', 240);
+  const safePreviousPrompt = truncate(previousPrompt || 'No prior prompt', 200);
 
-const fallbackPrompt = (safeLine, turnNumber) =>
-  [
-    'Story mentor: respond with exactly 2-3 sentences.',
-    'Advance the plot a little, keep tension, avoid closing threads.',
-    'Never spoil hidden outcomes or future reveals.',
-    'Do not introduce new characters or events unless the prompt clearly implies them.',
-    `Turn ${turnNumber}. Continue from: "${safeLine}".`,
-  ].join(' ');
+  return [
+    {
+      role: 'system',
+      content: [
+        'You create challenging constraints for a collaborative storytelling game.',
+        'Read the story context and craft ONE concise instruction that makes the next continuation trickier while staying coherent.',
+        'The instruction should start with "Continue the story, but..." and must reference concrete details from the provided context.',
+        'Keep it under 28 words. Do not write story text, only the instruction.',
+      ].join(' '),
+    },
+    {
+      role: 'user',
+      content: [
+        `Initial scene: ${truncate(initialPrompt || 'Unknown scene', 200)}`,
+        `Story so far (${turnNumber - 1} turns): ${safeStory}`,
+        `Last turn text: ${safeLastTurn}`,
+        `Previous prompt: ${safePreviousPrompt}`,
+        'Return one sentence instruction only.',
+      ].join('\n'),
+    },
+  ];
+};
+
+const fallbackPrompt = ({ storySoFar, lastTurnText }) => {
+  const base = truncate(lastTurnText || storySoFar || 'the current scene', 160);
+  return `Continue the story, but add a twist that complicates ${base}.`;
+};
 
 const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } = {}) => {
   const controller = new AbortController();
@@ -72,22 +81,34 @@ const callChatModel = async (messages, { temperature = 0.5, max_tokens = 100 } =
   }
 };
 
-export const generateGuidePrompt = async (lastLine, turnNumber = 1) => {
-  const safeLine = truncate(lastLine || 'the story continues', 120);
+export const generateGuidePrompt = async ({
+  storySoFar = '',
+  lastTurnText = '',
+  previousPrompt = '',
+  turnNumber = 1,
+  initialPrompt = '',
+} = {}) => {
+  const fallback = fallbackPrompt({ storySoFar, lastTurnText });
 
   if (!GROQ_API_KEY) {
-    return fallbackPrompt(safeLine, turnNumber);
+    return fallback;
   }
 
   try {
-    const messages = buildMessages(safeLine, turnNumber);
-    const guide = await callChatModel(messages);
+    const messages = buildMessages({
+      storySoFar,
+      lastTurnText,
+      previousPrompt,
+      turnNumber,
+      initialPrompt,
+    });
+    const guide = await callChatModel(messages, { temperature: 0.65, max_tokens: 90 });
     console.log('[aiService] model guide:', guide);
     return guide;
   } catch (error) {
     // Fall back to the local prompt format if the API call fails.
     console.warn('[aiService] AI call failed, using fallback prompt:', error);
-    return fallbackPrompt(safeLine, turnNumber);
+    return fallback;
   }
 };
 

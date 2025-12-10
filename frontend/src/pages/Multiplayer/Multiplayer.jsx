@@ -37,6 +37,8 @@ const Multiplayer = () => {
   const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'A mysterious door appears in the middle of the forest, glowing with an otherworldly light.'
   const isMyTurn = game?.currentPlayerId === user.id
   const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const previousTurn = game?.lastTurn || gameInfo?.lastTurn
+  const showPreviousTurn = isMyTurn && previousTurn?.text
   const players = game?.players || []
 
   // Redirect if no gameId
@@ -176,6 +178,16 @@ const Multiplayer = () => {
                       className="sticky top-8"
                     />
                   </motion.div>
+                  {showPreviousTurn && (
+                    <Card className="mt-4 p-4 sticky top-60">
+                      <div className="text-xs uppercase tracking-wide text-mint-pop font-semibold mb-2">
+                        Previous turn by {previousTurn.playerName}
+                      </div>
+                      <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                        {previousTurn.text}
+                      </div>
+                    </Card>
+                  )}
                   {timeRemaining > 0 && (
                     <motion.div
                       className={`mt-4 text-center text-sm ${themeClasses.textSecondary}`}
@@ -219,7 +231,7 @@ const Multiplayer = () => {
                     disabled={!isMyTurn || !story.trim() || previewTurnMutation.isPending}
                     className="flex-1 min-w-[180px]"
                   >
-                    {previewTurnMutation.isPending ? 'Previewing...' : 'Preview AI Response'}
+                    {previewTurnMutation.isPending ? 'Previewing...' : 'Preview Next Prompt'}
                   </Button>
                   <Button
                     variant="primary"
@@ -240,7 +252,7 @@ const Multiplayer = () => {
 
                 {(previewTurnMutation.isPending || preview) && (
                   <Card className="mt-4 bg-soft-charcoal/40">
-                    <div className="text-sm font-bold mb-2 text-mint-pop">AI Preview</div>
+                    <div className="text-sm font-bold mb-2 text-mint-pop">Next Prompt Preview</div>
                     {previewTurnMutation.isPending ? (
                       <div className="text-sm text-cloud-gray">Generating response...</div>
                     ) : (

@@ -38,9 +38,11 @@ const SinglePlayer = () => {
 
   const game = gameData?.game
   const gameInfo = gameData?.info
-  const currentPrompt = game?.initialPrompt || game?.guidePrompt || 'You wake up in a world where gravity works sideways.'
+  const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'You wake up in a world where gravity works sideways.'
   const isMyTurn = game?.currentPlayerId === user.id
   const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const previousTurn = game?.lastTurn || gameInfo?.lastTurn
+  const showPreviousTurn = isMyTurn && previousTurn?.text
 
   // Create game on mount if no gameId
   useEffect(() => {
@@ -190,6 +192,16 @@ const SinglePlayer = () => {
                 prompt={currentPrompt}
                 category="chaos"
               />
+              {showPreviousTurn && (
+                <Card className="mt-4 p-4">
+                  <div className="text-xs uppercase tracking-wide text-mint-pop font-semibold mb-2">
+                    Previous turn by {previousTurn.playerName}
+                  </div>
+                  <div className={`text-sm leading-relaxed ${themeClasses.text}`}>
+                    {previousTurn.text}
+                  </div>
+                </Card>
+              )}
             </div>
 
             {/* Center: Story Editor */}
@@ -197,7 +209,7 @@ const SinglePlayer = () => {
               <Card className="p-6">
                 <div className="mb-4 flex items-center justify-between">
                   <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
-                    {isMyTurn ? 'Your Turn' : "StoryBot's Turn"}
+                    {isMyTurn ? 'Your Turn' : `${game?.currentPlayer || 'Player'}'s Turn`}
                   </h3>
                   {timeRemaining > 0 && (
                     <Timer
@@ -218,7 +230,7 @@ const SinglePlayer = () => {
                       content={story}
                       onChange={setStory}
                       isActive={isMyTurn}
-                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for StoryBot..."}
+                      placeholder={isMyTurn ? "Start writing your story..." : "Waiting for your turn..."}
                     />
 
                     <div className="mt-6 flex flex-wrap gap-4">
@@ -228,7 +240,7 @@ const SinglePlayer = () => {
                         onClick={handlePreviewTurn}
                         disabled={!isMyTurn || !story.trim() || previewTurnMutation.isPending}
                       >
-                        {previewTurnMutation.isPending ? 'Previewing...' : 'Preview AI Response'}
+                        {previewTurnMutation.isPending ? 'Previewing...' : 'Preview Next Prompt'}
                       </Button>
                       <Button
                         variant="primary"
@@ -249,7 +261,7 @@ const SinglePlayer = () => {
 
                     {(previewTurnMutation.isPending || preview) && (
                       <Card className="mt-4 bg-soft-charcoal/40">
-                        <div className="text-sm font-bold mb-2 text-mint-pop">AI Preview</div>
+                        <div className="text-sm font-bold mb-2 text-mint-pop">Next Prompt Preview</div>
                         {previewTurnMutation.isPending ? (
                           <div className="text-sm text-cloud-gray">Generating response...</div>
                         ) : (
