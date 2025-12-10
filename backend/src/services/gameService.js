@@ -10,6 +10,13 @@ const leaderboardCollection = db.collection('leaderboard');
 const MODES = {
   SINGLE: 'single',
   MULTI: 'multi',
+  RAPID: 'rapid',
+};
+
+const RAPID_CONFIG = {
+  initialDurationSeconds: 60,
+  decrementSeconds: 5,
+  minimumSeconds: 20,
 };
 
 const clamp = (value, min, max, fallback) => {
@@ -117,23 +124,28 @@ export const createGame = async ({
   }
   const prompt = initialPrompt?.trim() || 'A traveler enters a mysterious forest...';
 
-  const duration = clamp(turnDurationSeconds, 30, 120, 60);
-  const turnsCap = clamp(maxTurns, 1, 20, 5);
-  const playerCap = clamp(maxPlayers, 2, 7, 3);
+  const isRapid = mode === MODES.RAPID;
+  const duration = isRapid
+    ? RAPID_CONFIG.initialDurationSeconds
+    : clamp(turnDurationSeconds, 30, 120, 60);
+  const turnsCap = clamp(maxTurns, 1, 50, isRapid ? 50 : 5);
+  const playerCap = clamp(maxPlayers, 2, 7, isRapid ? 2 : 3);
 
   const gameId = randomUUID();
   const createdAt = nowIso();
 
   const players = [{ id: hostId, name: cleanHost }];
-  if (mode === MODES.SINGLE) {
+  if (mode === MODES.SINGLE || isRapid) {
     players.push({ id: 'ai-bot', name: 'StoryBot' });
   }
+
+  const gameMode = isRapid ? MODES.RAPID : mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI;
 
   const game = {
     id: gameId,
     hostId,
     hostName: cleanHost,
-    status: 'waiting',
+    status: isRapid ? 'active' : 'waiting',
     initialPrompt: prompt,
     guidePrompt: prompt,
     players,
@@ -141,11 +153,13 @@ export const createGame = async ({
     turnDurationSeconds: duration,
     maxTurns: turnsCap,
     maxPlayers: playerCap,
-    turnDeadline: null,
+    turnDeadline: isRapid
+      ? new Date(Date.now() + duration * 1000).toISOString()
+      : null,
     currentPlayerIndex: 0,
     currentPlayer: cleanHost,
     currentPlayerId: hostId,
-    mode: mode === MODES.SINGLE ? MODES.SINGLE : MODES.MULTI,
+    mode: gameMode,
     createdAt,
     updatedAt: createdAt,
   };
@@ -177,7 +191,7 @@ export const joinGame = async (gameId, { playerName = 'Anonymous', playerId }) =
       return { error: 'Game has finished', status: 400 };
     }
 
-    if (game.mode === MODES.SINGLE) {
+    if (game.mode !== MODES.MULTI) {
       return { error: 'Cannot join a single-player game', status: 400 };
     }
 
@@ -247,6 +261,23 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
     if (game.turnDeadline) {
       const deadlineMs = new Date(game.turnDeadline).getTime();
       if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+        if (game.mode === MODES.RAPID) {
+          const finishedState = {
+            ...game,
+            status: 'finished',
+            currentPlayer: null,
+            currentPlayerId: null,
+            turnDeadline: null,
+            updatedAt: nowIso(),
+          };
+          tx.set(gameRef, finishedState);
+          return {
+            error: 'Turn timed out',
+            status: 409,
+            finished: true,
+          };
+        }
+
         const nextState = advanceTurnState({ ...game, status: 'timeout', updatedAt: nowIso() });
         tx.set(gameRef, nextState);
         return {
@@ -283,15 +314,24 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
 
     const finishedHuman = game.maxTurns ? order >= game.maxTurns : false;
 
+    const nextDuration =
+      game.mode === MODES.RAPID
+        ? Math.max(
+            RAPID_CONFIG.minimumSeconds,
+            (game.turnDurationSeconds || RAPID_CONFIG.initialDurationSeconds) - RAPID_CONFIG.decrementSeconds,
+          )
+        : game.turnDurationSeconds;
+
     const baseUpdate = {
       ...game,
       guidePrompt,
       turnsCount: order,
       updatedAt: nowIso(),
       status: finishedHuman ? 'finished' : 'active',
+      turnDurationSeconds: nextDuration,
       turnDeadline: finishedHuman
         ? null
-        : new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString(),
+        : new Date(Date.now() + nextDuration * 1000).toISOString(),
     };
 
     let progressed = finishedHuman ? { ...baseUpdate, currentPlayerId: null, currentPlayer: null } : advanceTurnState(baseUpdate);
@@ -300,7 +340,8 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
     tx.set(gameRef.collection('turns').doc(turnId), turn);
 
     // Single-player: auto AI turn
-    if (!finishedHuman && game.mode === 'single') {
+    const isSinglePlayerMode = game.mode === MODES.SINGLE || game.mode === MODES.RAPID;
+    if (!finishedHuman && isSinglePlayerMode) {
       const aiOrder = progressed.turnsCount + 1;
       const aiLastLine = cleanText;
       const aiGuide = await generateGuidePrompt(aiLastLine, aiOrder);
@@ -322,7 +363,7 @@ export const submitTurn = async (gameId, { playerName = 'Anonymous', playerId, t
       progressed.currentPlayerId = finishedAfterAi ? null : game.players[0]?.id;
       progressed.turnDeadline = finishedAfterAi
         ? null
-        : new Date(Date.now() + game.turnDurationSeconds * 1000).toISOString();
+        : new Date(Date.now() + (progressed.turnDurationSeconds || game.turnDurationSeconds) * 1000).toISOString();
       progressed.updatedAt = nowIso();
 
       tx.set(gameRef, progressed);
@@ -384,7 +425,25 @@ export const getGameState = async (gameId) => {
     return { error: 'Game not found', status: 404 };
   }
 
-  const game = snap.data();
+  let game = snap.data();
+
+  // Auto-finish rapid games when the timer expires
+  if (game.mode === MODES.RAPID && game.status === 'active' && game.turnDeadline) {
+    const deadlineMs = new Date(game.turnDeadline).getTime();
+    if (Number.isFinite(deadlineMs) && Date.now() > deadlineMs) {
+      const finished = {
+        ...game,
+        status: 'finished',
+        currentPlayer: null,
+        currentPlayerId: null,
+        turnDeadline: null,
+        updatedAt: nowIso(),
+      };
+      await gamesCollection.doc(gameId).set(finished);
+      game = finished;
+    }
+  }
+
   const deadlineMs = game.turnDeadline ? new Date(game.turnDeadline).getTime() : null;
   const timeRemainingSeconds = Number.isFinite(deadlineMs)
     ? Math.max(0, Math.floor((deadlineMs - Date.now()) / 1000))

@@ -63,3 +63,17 @@ Content-Type: application/json
 
 ### Get game state (uses ID from createGame)
 GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}
+
+########################################
+# Start flow for multiplayer (host + players)
+
+### Start game (host only)
+POST http://localhost:3001/api/game/{{createGame.response.body.game.id}}/start
+Content-Type: application/json
+
+{
+  "playerId": "tester-user-1"
+}
+
+### Get game state after start (should show status: active)
+GET http://localhost:3001/api/game/{{createGame.response.body.game.id}}

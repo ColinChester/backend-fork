@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useState, useEffect } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import PromptCard from '../../components/PromptCard/PromptCard'
 import StoryEditor from '../../components/StoryEditor/StoryEditor'
@@ -10,18 +10,109 @@ import Container from '../../components/Layout/Container'
 import { AnimatedBackground } from '../../components/Background'
 import { ThemeToggle } from '../../components/ThemeToggle'
 import { useThemeClasses } from '../../hooks/useThemeClasses'
+import { useUser } from '../../context/UserContext'
+import { useCreateGame, useSubmitTurn, useGameState } from '../../hooks/useGameAPI'
+import { useMatch } from '../../context/MatchContext'
 
 const RapidFire = () => {
   const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
   const themeClasses = useThemeClasses()
+  const { user } = useUser()
+  const { startMatch, updateMatch } = useMatch()
   const [story, setStory] = useState('')
-  const [round, setRound] = useState(1)
-  const [currentPrompt, setCurrentPrompt] = useState({
-    text: 'A robot learns to feel emotions for the first time.',
-    category: 'character',
+  const gameId = searchParams.get('gameId')
+  const createGameMutation = useCreateGame()
+  const submitTurnMutation = useSubmitTurn()
+  const { data: gameData, isLoading } = useGameState(gameId, {
+    enabled: !!gameId,
+    refetchInterval: 1000,
+    refetchWhileWaiting: true,
   })
 
-  const totalRounds = 5
+  const game = gameData?.game
+  const gameInfo = gameData?.info
+  const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const isMyTurn = game?.currentPlayerId === user?.id
+  const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'A robot learns to feel emotions for the first time.'
+  const currentTurnSeconds = game?.turnDurationSeconds || 60
+
+  // Create rapid game on mount
+  useEffect(() => {
+    if (!gameId && user.id && !createGameMutation.isPending) {
+      createGameMutation.mutate({
+        hostName: user.username || 'Player',
+        hostId: user.id,
+        initialPrompt: 'A robot learns to feel emotions for the first time.',
+        turnDurationSeconds: 60,
+        maxTurns: 50,
+        maxPlayers: 2,
+        mode: 'rapid',
+      }, {
+        onSuccess: (data) => {
+          if (data?.game?.id) {
+            navigate(`/rapidfire?gameId=${data.game.id}`, { replace: true })
+            startMatch({
+              id: data.game.id,
+              mode: 'rapid',
+              players: data.game.players,
+              currentPrompt: data.game.initialPrompt,
+              story: '',
+              timeLimit: 1,
+              status: 'playing',
+            })
+          }
+        },
+        onError: (error) => {
+          console.error('Failed to start rapid mode:', error)
+          alert('Failed to start rapid mode. Please try again.')
+        },
+      })
+    }
+  }, [gameId, user?.id, createGameMutation.isPending, navigate, startMatch, user?.username])
+
+  // Keep match context in sync
+  useEffect(() => {
+    if (game) {
+      updateMatch({
+        id: game.id,
+        mode: 'rapid',
+        players: game.players,
+        currentPrompt: game.guidePrompt || game.initialPrompt,
+        currentTurn: game.currentPlayer,
+        status: game.status,
+        timeRemaining,
+      })
+    }
+  }, [game, timeRemaining, updateMatch])
+
+  // Navigate to story view when finished
+  useEffect(() => {
+    if (game?.status === 'finished' && gameId) {
+      navigate(`/story/${gameId}`)
+    }
+  }, [game?.status, gameId, navigate])
+
+  const handleSubmitTurn = () => {
+    if (!gameId || !story.trim() || !isMyTurn) return
+
+    submitTurnMutation.mutate({
+      gameId,
+      turnData: {
+        playerName: user.username || 'Player',
+        playerId: user.id,
+        text: story,
+      },
+    }, {
+      onSuccess: () => {
+        setStory('')
+      },
+      onError: (error) => {
+        console.error('Failed to submit turn:', error)
+        alert(error.message || 'Failed to submit turn. Please try again.')
+      },
+    })
+  }
 
   return (
     <div className="min-h-screen bg-deep-graphite relative">
@@ -78,9 +169,9 @@ const RapidFire = () => {
               transition={{ repeat: Infinity, duration: 2 }}
             >
               <span className="text-3xl">⚡</span>
-              <span className="text-cloud-gray">Round</span>
+              <span className="text-cloud-gray">Turn</span>
               <span className="text-3xl font-header font-bold text-mint-pop">
-                {round} / {totalRounds}
+                {game?.turnsCount || 0}
               </span>
               <span className="text-3xl">🔥</span>
             </motion.div>
@@ -90,8 +181,8 @@ const RapidFire = () => {
             {/* Left: Prompt */}
             <div className="lg:col-span-1">
               <PromptCard
-                prompt={currentPrompt.text}
-                category={currentPrompt.category}
+                prompt={currentPrompt}
+                category="chaos"
               />
               <motion.div
                 className="mt-4 text-center"
@@ -99,49 +190,50 @@ const RapidFire = () => {
                 transition={{ repeat: Infinity, duration: 2 }}
               >
                 <div className={`text-sm ${themeClasses.textSecondary}`}>
-                  Next prompt in:
+                  Turn length (speeds up to 20s):
                 </div>
                 <div className="text-2xl font-decorative font-bold text-laser-coral">
-                  45s
+                  {currentTurnSeconds}s
                 </div>
               </motion.div>
             </div>
 
             {/* Center: Story Editor */}
             <div className="lg:col-span-2">
-              <Card className="p-6">
-                <div className="mb-4 flex items-center justify-between">
-                  <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>Your Story</h3>
-                  <Timer
-                    initialTime={60}
-                    size={80}
+              {isLoading && !game ? (
+                <Card className="p-6">
+                  <div className="text-center py-8">Loading rapid game...</div>
+                </Card>
+              ) : (
+                <Card className="p-6">
+                  <div className="mb-4 flex items-center justify-between">
+                    <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>Your Story</h3>
+                    <Timer
+                      initialTime={currentTurnSeconds}
+                      timeRemaining={timeRemaining}
+                      size={80}
+                    />
+                  </div>
+                  
+                  <StoryEditor
+                    content={story}
+                    onChange={setStory}
+                    isActive={isMyTurn}
+                    placeholder={isMyTurn ? "Write fast! Time is running out..." : "Waiting for StoryBot..."}
                   />
-                </div>
-                
-                <StoryEditor
-                  content={story}
-                  onChange={setStory}
-                  isActive={true}
-                  placeholder="Write fast! Time is running out..."
-                />
 
-                <div className="mt-6 flex gap-4">
-                  <Button
-                    variant="primary"
-                    className="flex-1"
-                    onClick={() => {
-                      if (round < totalRounds) {
-                        setRound(round + 1)
-                        setStory('')
-                      } else {
-                        navigate('/story/123')
-                      }
-                    }}
-                  >
-                    {round < totalRounds ? 'Next Round →' : 'Finish Story'}
-                  </Button>
-                </div>
-              </Card>
+                  <div className="mt-6 flex gap-4">
+                    <Button
+                      variant="primary"
+                      className="flex-1"
+                      onClick={handleSubmitTurn}
+                      disabled={!isMyTurn || !story.trim() || submitTurnMutation.isPending}
+                    >
+                      {submitTurnMutation.isPending ? 'Submitting...' : 'Send Turn →'}
+                    </Button>
+                  </div>
+                </Card>
+              )}
             </div>
           </div>
         </div>
@@ -151,4 +243,3 @@ const RapidFire = () => {
 }
 
 export default RapidFire
-
