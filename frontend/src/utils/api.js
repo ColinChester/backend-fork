@@ -117,6 +117,22 @@ export const gameAPI = {
 };
 
 /**
+ * Leaderboard API Functions
+ */
+export const leaderboardAPI = {
+  /**
+   * Get the leaderboard (top scores)
+   * @param {number} limit - Maximum number of entries to return (default 20)
+   */
+  getLeaderboard: async (limit = 20) => {
+    const search = new URLSearchParams({ limit: String(limit) });
+    return apiRequest(`/api/leaderboard?${search.toString()}`, {
+      method: 'GET',
+    });
+  },
+};
+
+/**
  * Health check endpoint
  */
 export const healthCheck = async () => {

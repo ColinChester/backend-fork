@@ -1,5 +1,6 @@
 import express from 'express';
 import gameRoutes from './routes/gameRoutes.js';
+import leaderboardRoutes from './routes/leaderboardRoutes.js';
 import cors from "cors";
 
 const app = express();
@@ -14,6 +15,7 @@ app.use((req, res, next) => {
 })
 
 app.use('/api/game', gameRoutes);
+app.use('/api/leaderboard', leaderboardRoutes);
 app.get('/', (req, res) => {
     res.json({
         message: 'StoryGame API is running'

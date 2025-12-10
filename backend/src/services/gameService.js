@@ -6,6 +6,13 @@ import { scoreGame } from './scoringService.js';
 const gamesCollection = db.collection('games');
 const usersCollection = db.collection('users');
 const leaderboardCollection = db.collection('leaderboard');
+const getTestUserIds = () =>
+  new Set(
+    (process.env.TEST_USER_IDS || '')
+      .split(',')
+      .map((id) => id.trim())
+      .filter(Boolean),
+  );
 
 const MODES = {
   SINGLE: 'single',
@@ -107,6 +114,45 @@ const updateLeaderboard = async (playerScores, players, summary) => {
     excess.forEach((doc) => batch.delete(doc.ref));
     await batch.commit();
   }
+};
+
+export const getLeaderboard = async ({ limit = 20 } = {}) => {
+  const maxLimit = Math.max(1, Math.min(limit, 50));
+  const testUserIds = getTestUserIds();
+
+  // Fetch a few extra rows in case we need to filter test users out
+  const snap = await leaderboardCollection
+    .orderBy('topScore', 'desc')
+    .limit(maxLimit + testUserIds.size)
+    .get();
+
+  const leaderboard = [];
+  const isTestUser = (entry) => {
+    if (testUserIds.has(entry.userId)) return true;
+    if (typeof entry.userId === 'string' && entry.userId.startsWith('test-user')) return true;
+    if (typeof entry.username === 'string' && /^test[\s_-]?/i.test(entry.username.trim())) return true;
+    return false;
+  };
+  for (const doc of snap.docs) {
+    const data = doc.data();
+    if (!data?.userId || typeof data.topScore === 'undefined') continue;
+    if (isTestUser(data)) continue;
+
+    leaderboard.push({
+      userId: data.userId,
+      username: data.username || 'Unknown',
+      topScore: Number(data.topScore) || 0,
+      lastScore: Number(data.lastScore) || 0,
+      gamesPlayed: Number(data.gamesPlayed) || 0,
+      lastUpdated: data.lastUpdated || null,
+      topGameSummary: data.topGameSummary || null,
+      rank: leaderboard.length + 1,
+    });
+
+    if (leaderboard.length >= maxLimit) break;
+  }
+
+  return leaderboard;
 };
 
 export const createGame = async ({
