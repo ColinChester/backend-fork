@@ -24,6 +24,7 @@ const SinglePlayer = () => {
   const [preview, setPreview] = useState('')
   const [turnDurationSeconds, setTurnDurationSeconds] = useState(180) // default 3 minutes
   const [hasStarted, setHasStarted] = useState(!!searchParams.get('gameId'))
+  const [localCountdown, setLocalCountdown] = useState(null)
   
   const gameId = searchParams.get('gameId')
   const createGameMutation = useCreateGame()
@@ -42,7 +43,10 @@ const SinglePlayer = () => {
   const gameInfo = gameData?.info
   const currentPrompt = game?.guidePrompt || game?.initialPrompt || 'You wake up in a world where gravity works sideways.'
   const isMyTurn = game?.currentPlayerId === user.id
-  const timeRemaining = gameInfo?.timeRemainingSeconds || 0
+  const timeRemaining = typeof gameInfo?.timeRemainingSeconds === 'number'
+    ? gameInfo.timeRemainingSeconds
+    : null
+  const displayTime = (localCountdown ?? timeRemaining ?? game?.turnDurationSeconds ?? turnDurationSeconds ?? 0)
   const previousTurn = game?.lastTurn || gameInfo?.lastTurn
   const showPreviousTurn = isMyTurn && previousTurn?.text
 
@@ -51,6 +55,21 @@ const SinglePlayer = () => {
       setTurnDurationSeconds(game.turnDurationSeconds)
     }
   }, [game?.turnDurationSeconds])
+
+  // Smooth countdown between backend polls using the latest server time remaining
+  useEffect(() => {
+    if (typeof timeRemaining !== 'number') {
+      setLocalCountdown(null)
+      return
+    }
+    setLocalCountdown(timeRemaining)
+    const startedAt = Date.now()
+    const interval = setInterval(() => {
+      const elapsed = Math.floor((Date.now() - startedAt) / 1000)
+      setLocalCountdown(Math.max(0, timeRemaining - elapsed))
+    }, 1000)
+    return () => clearInterval(interval)
+  }, [timeRemaining])
 
   const beginGame = () => {
     if (!user.id || createGameMutation.isPending) return
@@ -272,10 +291,10 @@ const SinglePlayer = () => {
                   <h3 className={`text-xl font-header font-bold ${themeClasses.text}`}>
                     {isMyTurn ? 'Your Turn' : `${game?.currentPlayer || 'Player'}'s Turn`}
                   </h3>
-                  {timeRemaining > 0 && (
+                  {displayTime > 0 && (
                     <Timer
                       initialTime={game?.turnDurationSeconds || turnDurationSeconds || 300}
-                      timeRemaining={timeRemaining}
+                      timeRemaining={displayTime}
                       size={80}
                     />
                   )}
